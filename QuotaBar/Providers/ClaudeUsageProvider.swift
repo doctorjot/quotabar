@@ -72,11 +72,8 @@ struct ClaudeUsageProvider: UsageProvider {
         if let limits = payload.limits, !limits.isEmpty {
             let mapped = limits.compactMap { entry -> UsageSnapshot? in
                 guard let percentUsed = entry.percent else { return nil }
-                // A scoped limit without a reset time was never touched;
-                // showing it as "100% remaining" only adds noise.
-                if entry.kind == "weekly_scoped" && entry.resetsAt == nil { return nil }
                 return UsageSnapshot(
-                    percentRemaining: 100 - percentUsed,
+                    percentUsed: percentUsed,
                     resetsAt: DateParsing.iso8601(entry.resetsAt),
                     windowLabel: label(for: entry),
                     capturedAt: capturedAt
@@ -93,7 +90,7 @@ struct ClaudeUsageProvider: UsageProvider {
         ].compactMap { quota, label in
             guard let utilization = quota?.utilization else { return nil }
             return UsageSnapshot(
-                percentRemaining: 100 - utilization,
+                percentUsed: utilization,
                 resetsAt: DateParsing.iso8601(quota?.resetsAt),
                 windowLabel: label,
                 capturedAt: capturedAt

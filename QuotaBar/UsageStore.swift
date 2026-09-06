@@ -23,9 +23,9 @@ final class UsageStore {
         startAutoRefresh()
     }
 
-    /// Lowest remaining percentage across all windows — what the menu bar shows.
+    /// Highest consumption across all windows — what the menu bar shows.
     var headlinePercent: Double? {
-        results.flatMap { $0.state.snapshots }.map(\.percentRemaining).min()
+        results.flatMap { $0.state.snapshots }.map(\.percentUsed).max()
     }
 
     var hasFailure: Bool {

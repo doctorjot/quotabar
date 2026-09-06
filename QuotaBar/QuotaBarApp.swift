@@ -2,24 +2,12 @@ import SwiftUI
 
 @main
 struct QuotaBarApp: App {
-    @State private var store = UsageStore(providers: [
-        ClaudeUsageProvider(),
-        GrokUsageProvider()
-    ])
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        MenuBarExtra {
-            PopoverView(store: store)
-        } label: {
-            Text(menuBarLabel)
-        }
-        .menuBarExtraStyle(.window)
-    }
-
-    private var menuBarLabel: String {
-        if let percent = store.headlinePercent {
-            return SnapshotRow.percentFormat(percent)
-        }
-        return store.hasFailure ? "–%" : "…"
+        // The status item lives in AppDelegate; this scene exists only because
+        // an App needs one. LSUIElement keeps it out of the Dock and the
+        // window never opens by itself.
+        Settings { EmptyView() }
     }
 }

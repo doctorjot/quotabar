@@ -2,8 +2,8 @@ import Foundation
 
 /// One usage window of one provider (e.g. Claude's 5h session window).
 struct UsageSnapshot: Sendable, Hashable {
-    /// Remaining quota in percent, 0...100.
-    let percentRemaining: Double
+    /// Consumed quota in percent, 0...100 — same direction as the Claude app.
+    let percentUsed: Double
     /// When the window rolls over, if known.
     let resetsAt: Date?
     /// Human readable window name, e.g. "Session" or "Woche".
@@ -14,13 +14,13 @@ struct UsageSnapshot: Sendable, Hashable {
     let detail: String?
 
     init(
-        percentRemaining: Double,
+        percentUsed: Double,
         resetsAt: Date?,
         windowLabel: String,
         capturedAt: Date,
         detail: String? = nil
     ) {
-        self.percentRemaining = min(max(percentRemaining, 0), 100)
+        self.percentUsed = min(max(percentUsed, 0), 100)
         self.resetsAt = resetsAt
         self.windowLabel = windowLabel
         self.capturedAt = capturedAt

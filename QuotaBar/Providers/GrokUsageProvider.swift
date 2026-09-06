@@ -85,7 +85,7 @@ struct GrokUsageProvider: UsageProvider {
             .joined(separator: " · ")
 
         return UsageSnapshot(
-            percentRemaining: 100 - used,
+            percentUsed: used,
             resetsAt: DateParsing.iso8601(config.currentPeriod?.end ?? config.billingPeriodEnd),
             windowLabel: "Woche",
             capturedAt: capturedAt,

@@ -13,11 +13,11 @@ struct SnapshotRow: View {
                 Text("\(providerName) · \(snapshot.windowLabel)")
                     .font(.system(size: 12, weight: .medium))
                 Spacer()
-                Text(Self.percentFormat(snapshot.percentRemaining))
+                Text(Self.percentFormat(snapshot.percentUsed))
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
             }
 
-            ProgressView(value: snapshot.percentRemaining, total: 100)
+            ProgressView(value: snapshot.percentUsed, total: 100)
                 .progressViewStyle(.linear)
                 .tint(isStale ? .secondary : barColor)
 
@@ -43,9 +43,9 @@ struct SnapshotRow: View {
     }
 
     private var barColor: Color {
-        switch snapshot.percentRemaining {
-        case ..<10: .red
-        case ..<25: .orange
+        switch snapshot.percentUsed {
+        case 90...: .red
+        case 75...: .orange
         default: .accentColor
         }
     }
