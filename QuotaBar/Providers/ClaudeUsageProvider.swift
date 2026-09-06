@@ -15,8 +15,19 @@ struct ClaudeUsageProvider: UsageProvider {
     /// windows, so back off generously when it does not say how long.
     private static let defaultBackoff: TimeInterval = 30 * 60
 
+    /// Reading the Keychain can prompt, so the token is held in memory until
+    /// it expires — one prompt per app launch instead of one per refresh.
+    private static let tokenCache = TokenCache()
+
     func fetch() async throws -> [UsageSnapshot] {
-        let token = try accessToken()
+        let token: String
+        if let cached = await Self.tokenCache.valid() {
+            token = cached
+        } else {
+            let fresh = try accessToken()
+            await Self.tokenCache.store(fresh.token, expiresAt: fresh.expiresAt)
+            token = fresh.token
+        }
 
         var request = URLRequest(url: Self.usageURL)
         request.httpMethod = "GET"
@@ -33,6 +44,9 @@ struct ClaudeUsageProvider: UsageProvider {
             throw ProviderError.rateLimited(until: http.retryAfterDate(default: Self.defaultBackoff))
         }
         if http.statusCode == 401 || http.statusCode == 403 {
+            // Claude Code may have rotated the token — drop ours so the next
+            // run reads the Keychain again.
+            await Self.tokenCache.clear()
             throw ProviderError.credentialsExpired("in Claude Code neu anmelden")
         }
         guard http.statusCode == 200 else { throw ProviderError.httpStatus(http.statusCode) }
@@ -48,7 +62,7 @@ struct ClaudeUsageProvider: UsageProvider {
         return snapshots
     }
 
-    private func accessToken() throws -> String {
+    private func accessToken() throws -> (token: String, expiresAt: Date?) {
         guard let data = Keychain.genericPassword(service: Self.keychainService) else {
             throw ProviderError.noCredentials("Keychain-Eintrag „\(Self.keychainService)\" nicht lesbar")
         }
@@ -56,14 +70,15 @@ struct ClaudeUsageProvider: UsageProvider {
             throw ProviderError.malformedResponse
         }
         let oauth = stored.claudeAiOauth
-        if let expiresAt = oauth.expiresAt, Date(timeIntervalSince1970: expiresAt / 1000) < Date() {
+        let expiry = oauth.expiresAt.map { Date(timeIntervalSince1970: $0 / 1000) }
+        if let expiry, expiry < Date() {
             throw ProviderError.credentialsExpired("in Claude Code neu anmelden")
         }
         let token = oauth.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {
             throw ProviderError.noCredentials("Token im Keychain ist leer")
         }
-        return token
+        return (token, expiry)
     }
 
     /// Prefers the generic `limits` array — model-scoped quotas appear only
@@ -106,6 +121,30 @@ struct ClaudeUsageProvider: UsageProvider {
             if let model = entry.scope?.model?.displayName { "Woche \(model)" } else { "Woche (Modell)" }
         default: entry.kind ?? "Kontingent"
         }
+    }
+}
+
+/// Holds the access token for the lifetime of the process.
+private actor TokenCache {
+    private var token: String?
+    private var expiresAt: Date?
+
+    func valid() -> String? {
+        guard let token else { return nil }
+        // Retire it a minute early so a request cannot start on a token that
+        // expires mid-flight.
+        if let expiresAt, expiresAt.addingTimeInterval(-60) < Date() { return nil }
+        return token
+    }
+
+    func store(_ token: String, expiresAt: Date?) {
+        self.token = token
+        self.expiresAt = expiresAt
+    }
+
+    func clear() {
+        token = nil
+        expiresAt = nil
     }
 }
 
