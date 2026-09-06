@@ -8,6 +8,13 @@ final class UsageStore {
     private(set) var isRefreshing = false
     private(set) var lastRefresh: Date?
 
+    /// Which window drives the menu bar number. Empty means "whichever is
+    /// fullest". Otherwise "<providerID>|<windowLabel>".
+    var menuBarSelection: String {
+        didSet { UserDefaults.standard.set(menuBarSelection, forKey: Self.selectionKey) }
+    }
+
+    private static let selectionKey = "MenuBarSelection"
     private let providers: [any UsageProvider]
     /// Anthropic's usage endpoint throttles aggressively — hour-long
     /// Retry-After windows have been seen after a single call. 15 minutes
@@ -20,12 +27,42 @@ final class UsageStore {
         self.results = providers.map {
             ProviderResult(id: $0.id, displayName: $0.displayName, state: .loading)
         }
+        self.menuBarSelection = UserDefaults.standard.string(forKey: Self.selectionKey) ?? ""
         startAutoRefresh()
     }
 
-    /// Highest consumption across all windows — what the menu bar shows.
+    /// What the menu bar shows: the chosen window, or the fullest one.
+    /// Falls back to the maximum when the chosen window has disappeared.
     var headlinePercent: Double? {
-        results.flatMap { $0.state.snapshots }.map(\.percentUsed).max()
+        if let selected = selectedSnapshot() { return selected.percentUsed }
+        return results.flatMap { $0.state.snapshots }.map(\.percentUsed).max()
+    }
+
+    /// Options for the menu bar picker, rebuilt from whatever data is loaded.
+    var menuBarOptions: [MenuBarOption] {
+        [MenuBarOption(id: "", title: "Höchster Wert")] + results.flatMap { result in
+            result.state.snapshots.map { snapshot in
+                MenuBarOption(
+                    id: Self.key(providerID: result.id, windowLabel: snapshot.windowLabel),
+                    title: "\(result.displayName) · \(snapshot.windowLabel)"
+                )
+            }
+        }
+    }
+
+    private func selectedSnapshot() -> UsageSnapshot? {
+        guard !menuBarSelection.isEmpty else { return nil }
+        for result in results {
+            for snapshot in result.state.snapshots
+            where Self.key(providerID: result.id, windowLabel: snapshot.windowLabel) == menuBarSelection {
+                return snapshot
+            }
+        }
+        return nil
+    }
+
+    private static func key(providerID: String, windowLabel: String) -> String {
+        "\(providerID)|\(windowLabel)"
     }
 
     var hasFailure: Bool {

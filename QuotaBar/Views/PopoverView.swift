@@ -16,6 +16,23 @@ struct PopoverView: View {
 
             Divider()
 
+            HStack(spacing: 6) {
+                Text("In der Leiste:")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Picker("", selection: Binding(
+                    get: { store.menuBarSelection },
+                    set: { store.menuBarSelection = $0 }
+                )) {
+                    ForEach(store.menuBarOptions) { option in
+                        Text(option.title).tag(option.id)
+                    }
+                }
+                .labelsHidden()
+                .controlSize(.small)
+                .font(.system(size: 11))
+            }
+
             HStack {
                 Button("Jetzt aktualisieren") {
                     Task { await store.refresh() }

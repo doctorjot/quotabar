@@ -46,6 +46,12 @@ enum ProviderState: Sendable {
     }
 }
 
+/// One entry in the menu bar picker.
+struct MenuBarOption: Identifiable, Hashable, Sendable {
+    let id: String
+    let title: String
+}
+
 struct ProviderResult: Sendable, Identifiable {
     let id: String
     let displayName: String
