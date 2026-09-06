@@ -55,13 +55,15 @@ struct SnapshotRow: View {
     }
 
     static func resetText(from now: Date, to resetsAt: Date) -> String {
-        let seconds = Int(resetsAt.timeIntervalSince(now))
+        let seconds = resetsAt.timeIntervalSince(now)
         guard seconds > 0 else { return "Reset fällig" }
-        let hours = seconds / 3600
-        let minutes = (seconds % 3600) / 60
+        // Round the part-minute up, the way a countdown reads and the way the
+        // Claude app shows it — 36:45 left is "37m", not "36m".
+        let totalMinutes = Int((seconds / 60).rounded(.up))
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
         if hours >= 24 {
-            let days = hours / 24
-            return "Reset in \(days)d \(hours % 24)h"
+            return "Reset in \(hours / 24)d \(hours % 24)h"
         }
         return hours > 0 ? "Reset in \(hours)h \(minutes)m" : "Reset in \(minutes)m"
     }

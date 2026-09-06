@@ -52,6 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
+            // Let the content refresh its clock before it becomes visible.
+            NotificationCenter.default.post(name: .popoverWillShow, object: nil)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
@@ -78,4 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem?.button?.title = store.hasFailure ? "–%" : "…"
         }
     }
+}
+
+extension Notification.Name {
+    static let popoverWillShow = Notification.Name("QuotaBarPopoverWillShow")
 }

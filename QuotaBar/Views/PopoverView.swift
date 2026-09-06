@@ -48,6 +48,11 @@ struct PopoverView: View {
         .padding(14)
         .frame(width: 280)
         .onReceive(Self.clock) { now = $0 }
+        // The hosting view outlives a single showing, so onAppear fires once.
+        // Re-read the clock every time the popover opens instead.
+        .onReceive(NotificationCenter.default.publisher(for: .popoverWillShow)) { _ in
+            now = Date()
+        }
         .onAppear { now = Date() }
     }
 
