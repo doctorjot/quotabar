@@ -1,7 +1,7 @@
 import Foundation
 
 /// One usage window of one provider (e.g. Claude's 5h session window).
-struct UsageSnapshot: Sendable, Hashable {
+struct UsageSnapshot: Sendable, Hashable, Codable {
     /// Consumed quota in percent, 0...100 — same direction as the Claude app.
     let percentUsed: Double
     /// When the window rolls over, if known.

@@ -15,6 +15,7 @@ final class UsageStore {
     }
 
     private static let selectionKey = "MenuBarSelection"
+    private static let snapshotsKey = "LastSnapshots"
     private let providers: [any UsageProvider]
     /// Anthropic's usage endpoint throttles aggressively — hour-long
     /// Retry-After windows have been seen after a single call. 15 minutes
@@ -28,6 +29,17 @@ final class UsageStore {
             ProviderResult(id: $0.id, displayName: $0.displayName, state: .loading)
         }
         self.menuBarSelection = UserDefaults.standard.string(forKey: Self.selectionKey) ?? ""
+
+        // Show the last known numbers immediately. They grey out on their own
+        // once stale, which beats an empty popover while the first fetch runs
+        // — or while a rate-limit window blocks it entirely.
+        let cached = Self.loadCachedSnapshots()
+        for index in results.indices {
+            if let snapshots = cached[results[index].id], !snapshots.isEmpty {
+                results[index].state = .ok(snapshots)
+            }
+        }
+
         startAutoRefresh()
     }
 
@@ -40,7 +52,8 @@ final class UsageStore {
 
     /// Options for the menu bar picker, rebuilt from whatever data is loaded.
     var menuBarOptions: [MenuBarOption] {
-        [MenuBarOption(id: "", title: "Höchster Wert")] + results.flatMap { result in
+        var options = [MenuBarOption(id: "", title: "Höchster Wert")]
+        options += results.flatMap { result in
             result.state.snapshots.map { snapshot in
                 MenuBarOption(
                     id: Self.key(providerID: result.id, windowLabel: snapshot.windowLabel),
@@ -48,6 +61,21 @@ final class UsageStore {
                 )
             }
         }
+        // A window the user picked may be missing right now — a failing
+        // provider, a limit that vanished. Keep offering it, otherwise the
+        // picker has no row matching the selection and renders blank.
+        if !menuBarSelection.isEmpty,
+           !options.contains(where: { $0.id == menuBarSelection }) {
+            options.append(MenuBarOption(id: menuBarSelection, title: title(forKey: menuBarSelection)))
+        }
+        return options
+    }
+
+    private func title(forKey key: String) -> String {
+        let parts = key.split(separator: "|", maxSplits: 1)
+        guard parts.count == 2 else { return key }
+        let name = results.first { $0.id == parts[0] }?.displayName ?? String(parts[0])
+        return "\(name) · \(parts[1])"
     }
 
     private func selectedSnapshot() -> UsageSnapshot? {
@@ -123,5 +151,22 @@ final class UsageStore {
             results[index].state = state
         }
         lastRefresh = Date()
+        persistSnapshots()
+    }
+
+    private func persistSnapshots() {
+        var payload = [String: [UsageSnapshot]]()
+        for result in results where !result.state.snapshots.isEmpty {
+            payload[result.id] = result.state.snapshots
+        }
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        UserDefaults.standard.set(data, forKey: Self.snapshotsKey)
+    }
+
+    private static func loadCachedSnapshots() -> [String: [UsageSnapshot]] {
+        guard let data = UserDefaults.standard.data(forKey: snapshotsKey),
+              let decoded = try? JSONDecoder().decode([String: [UsageSnapshot]].self, from: data)
+        else { return [:] }
+        return decoded
     }
 }
