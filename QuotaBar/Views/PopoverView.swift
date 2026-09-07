@@ -5,6 +5,7 @@ struct PopoverView: View {
     /// Ticks once a minute so "Reset in …" and the stale check stay current
     /// while the popover is open.
     @State private var now = Date()
+    @AppStorage("ClaudeTokenRefreshEnabled") private var refreshTokenEnabled = false
 
     private static let clock = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -32,6 +33,14 @@ struct PopoverView: View {
                 .controlSize(.small)
                 .font(.system(size: 11))
             }
+
+            Toggle(isOn: $refreshTokenEnabled) {
+                Text("Token selbst erneuern")
+                    .font(.system(size: 11))
+            }
+            .toggleStyle(.checkbox)
+            .help("Erspart die Keychain-Abfrage, erneuert dafür Claudes Zugangsdaten selbst. "
+                  + "Falls Claude Code danach abgemeldet ist: `claude login`.")
 
             HStack {
                 Button("Jetzt aktualisieren") {

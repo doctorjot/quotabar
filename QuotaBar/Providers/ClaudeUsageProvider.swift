@@ -9,8 +9,18 @@ struct ClaudeUsageProvider: UsageProvider {
     let id = "claude"
     let displayName = "Claude"
 
-    private static let keychainService = "Claude Code-credentials"
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    private static let refreshURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
+    /// Claude Code's own OAuth client. May change when Claude Code updates.
+    private static let clientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+    private static let scopes = "user:profile user:inference user:sessions:claude_code"
+    private static let credentialStore = ClaudeCredentialStore()
+
+    /// Off by default: renewing the token rotates it, and the rotated value has
+    /// to land back in Claude Code's Keychain item or the CLI is signed out.
+    static var refreshEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "ClaudeTokenRefreshEnabled")
+    }
     /// The endpoint has been observed handing out hour-long Retry-After
     /// windows, so back off generously when it does not say how long.
     private static let defaultBackoff: TimeInterval = 30 * 60
@@ -23,10 +33,10 @@ struct ClaudeUsageProvider: UsageProvider {
         let token: String
         if let cached = await Self.tokenCache.valid() {
             token = cached
+        } else if Self.refreshEnabled {
+            token = try await currentTokenRenewingIfNeeded()
         } else {
-            let fresh = try accessToken()
-            await Self.tokenCache.store(fresh.token, expiresAt: fresh.expiresAt)
-            token = fresh.token
+            token = try await currentToken()
         }
 
         var request = URLRequest(url: Self.usageURL)
@@ -47,6 +57,7 @@ struct ClaudeUsageProvider: UsageProvider {
             // Claude Code may have rotated the token — drop ours so the next
             // run reads the Keychain again.
             await Self.tokenCache.clear()
+            await Self.credentialStore.clear()
             throw ProviderError.credentialsExpired("in Claude Code neu anmelden")
         }
         guard http.statusCode == 200 else { throw ProviderError.httpStatus(http.statusCode) }
@@ -62,23 +73,74 @@ struct ClaudeUsageProvider: UsageProvider {
         return snapshots
     }
 
-    private func accessToken() throws -> (token: String, expiresAt: Date?) {
-        guard let data = Keychain.genericPassword(service: Self.keychainService) else {
-            throw ProviderError.noCredentials("Keychain-Eintrag „\(Self.keychainService)\" nicht lesbar")
+    /// Refresh path. Reads through the mirror (silent), renews when the token
+    /// is spent, and writes the rotated credentials back to both items.
+    private func currentTokenRenewingIfNeeded() async throws -> String {
+        var credentials = try await Self.credentialStore.load()
+
+        if credentials.isExpired {
+            guard let refreshToken = credentials.refreshToken else {
+                throw ProviderError.credentialsExpired("in Claude Code neu anmelden")
+            }
+            credentials = try await renew(credentials, using: refreshToken)
+            await Self.credentialStore.store(credentials)
         }
-        guard let stored = try? JSONDecoder().decode(StoredCredentials.self, from: data) else {
+
+        await Self.tokenCache.store(credentials.accessToken, expiresAt: credentials.expiresAt)
+        return credentials.accessToken
+    }
+
+    private func renew(
+        _ credentials: ClaudeCredentialStore.Credentials,
+        using refreshToken: String
+    ) async throws -> ClaudeCredentialStore.Credentials {
+        var request = URLRequest(url: Self.refreshURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("QuotaBar", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 15
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": Self.clientID,
+            "scope": Self.scopes
+        ])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ProviderError.malformedResponse }
+
+        guard (200..<300).contains(http.statusCode) else {
+            await Self.credentialStore.clear()
+            await Self.tokenCache.clear()
+            // 400/401 here means the refresh token itself is spent — usually
+            // because something else already redeemed and rotated it.
+            throw ProviderError.credentialsExpired("`claude login` im Terminal ausführen")
+        }
+
+        guard let payload = try? JSONDecoder().decode(TokenRefreshResponse.self, from: data),
+              let accessToken = payload.access_token, !accessToken.isEmpty else {
             throw ProviderError.malformedResponse
         }
-        let oauth = stored.claudeAiOauth
-        let expiry = oauth.expiresAt.map { Date(timeIntervalSince1970: $0 / 1000) }
-        if let expiry, expiry < Date() {
+
+        return ClaudeCredentialStore.applying(
+            accessToken: accessToken,
+            refreshToken: payload.refresh_token,
+            expiresIn: payload.expires_in,
+            to: credentials
+        )
+    }
+
+    /// Default path: no renewal. Reads through the mirror, which is silent,
+    /// and only touches Claude Code's item when the mirror is missing or spent
+    /// — one Keychain prompt per token lifetime instead of one per launch.
+    private func currentToken() async throws -> String {
+        let credentials = try await Self.credentialStore.load()
+        guard !credentials.isExpired else {
+            await Self.credentialStore.clear()
             throw ProviderError.credentialsExpired("in Claude Code neu anmelden")
         }
-        let token = oauth.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else {
-            throw ProviderError.noCredentials("Token im Keychain ist leer")
-        }
-        return (token, expiry)
+        await Self.tokenCache.store(credentials.accessToken, expiresAt: credentials.expiresAt)
+        return credentials.accessToken
     }
 
     /// Prefers the generic `limits` array — model-scoped quotas appear only
@@ -174,10 +236,8 @@ struct UsageResponse: Decodable, Sendable {
     let limits: [LimitEntry]?
 }
 
-private struct StoredCredentials: Decodable {
-    struct OAuth: Decodable {
-        let accessToken: String
-        let expiresAt: Double?
-    }
-    let claudeAiOauth: OAuth
+private struct TokenRefreshResponse: Decodable {
+    let access_token: String?
+    let refresh_token: String?
+    let expires_in: Int?
 }
